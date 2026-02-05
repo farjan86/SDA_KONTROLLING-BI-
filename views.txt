@@ -277,7 +277,7 @@ Ertekek as (
 	select
 		kb.BizDatum as KonyvDatum,
 		fsz.Azonosito as FokszAzonosito,
-		cast(case when eszla.KoltsegNem in ('9') then (kbs.KovErtek-kbs.TarErtek) else (kbs.TarErtek-kbs.KovErtek) end as decimal) as Egyenleg
+		cast(case when eszla.KoltsegNem in ('9') then (kbs.KovErtek-kbs.TarErtek) else (kbs.TarErtek-kbs.KovErtek) end as decimal(18,2)) as Egyenleg
 		
 		from TKonyvBizSor kbs
 		inner join TKonyvBiz kb on kb.Azonosito=kbs.KonyvBiz
