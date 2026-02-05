@@ -1,0 +1,391 @@
+DROP VIEW eosview.SDA_Penzugy_Bank
+DROP VIEW eosview.SDA_Penzugy_Szla
+DROP VIEW eosview.SDA_Szervezet
+DROP VIEW eosview.SDA_Eredm
+DROP VIEW eosview.SDA_EredmSablon
+DROP VIEW eosview.SDA_EredmEredmSablon
+
+
+
+
+
+CREATE VIEW eosview.SDA_Szervezet
+AS
+
+select
+p.Nev as Szervezet, 
+p.RovidNev as RovidNev,
+p.Adoszam as Adoszam, 
+left(p.Adoszam, 8) as TorzsSzam,
+p.EuAdoSzam as EuAdoszam
+from TPart p
+where p.UgyfelJel=1
+
+###############################################################
+
+
+
+CREATE VIEW eosview.SDA_Penzugy_Bank
+AS
+
+select
+	p.Nev as Szervezet,
+	left(p.Adoszam,8) as TorzsSzam,
+	bk.Azonosito as BankKivonat,
+	pb.BankSzlaSzam as BankSzlaSzam, 
+	b.Nev as BankNev, 
+	b.GiroKod as GiroKod,
+	pe.Kod as PenzNem,
+	cast(bk.BankDatumKezd as Date) as BankDatumKezd, 
+	year(cast(bk.BankDatumKezd as Date)) Ev,
+	month(cast(bk.BankDatumKezd as Date)) Honap,
+	day(cast(bk.BankDatumKezd as Date)) Nap,
+	cast(bk.NyitoErtek as decimal) as NyitoErtek, 
+	cast(bk.JovairasErtek as decimal) as JovairasErtek, 
+	cast(bk.TerhelesErtek as decimal) as TerhelesErtek, 
+	cast((bk.NyitoErtek-bk.TerhelesErtek)+bk.JovairasErtek as decimal) as ZaroEgyenleg, 
+	coalesce(bankkivonat.Feldolgozva,0) as Feldolgozva,
+	coalesce(bankkivonat.NincsFeldolgozva,0) as NincsFeldolgozva
+
+	from TBankKivonat bk 
+	inner join TPart p on p.UgyfelJel=1
+	inner join TPart_BankSzla pb on pb.Azonosito=bk.UgyfelBankSzla
+	inner join TBank b on b.Azonosito=pb.Bank
+	inner join TPenzNem pe on pe.Azonosito = pb.PenzNem
+	left join (
+		select
+		x.BankKivonat as BankKivonat, 
+		sum(x.Feldolgozva) as Feldolgozva,
+		sum(x.NincsFeldolgozva) as NincsFeldolgozva
+		from (
+			select 
+				bks.BankKivonat as BankKivonat,
+				case when bks.Ertek = coalesce(a.Ertek,0) then 1 else 0 end Feldolgozva,
+				case when bks.Ertek != coalesce(a.Ertek,0) then 1 else 0 end NincsFeldolgozva
+				from TBankKivonatSor bks
+				left join (
+						select
+							bks.Azonosito as BankiKivonatSor,
+							sum(bt.Ertek) as Ertek
+							from TBankKivonatSor_Tetel bt
+							inner join TBankKivonatSor bks on bks.Azonosito = bt.BankKivonatSor
+							inner join TBankKivonat bk on bk.Azonosito = bks.BankKivonat
+							where bt.Zarva=1
+							group by bks.Azonosito
+						)a on a.BankiKivonatSor=bks.Azonosito
+			) x
+
+			group by x.BankKivonat
+			
+		) bankkivonat on bankkivonat.BankKivonat=bk.Azonosito					
+	where bk.Azonosito !=0
+
+
+
+
+
+###########################################FASZA######################################################ÚJ
+
+
+CREATE VIEW eosview.SDA_Penzugy_Szla
+AS
+
+WITH ElsoPforgDatumok AS (
+    SELECT
+        pfbs.SzlaBiz as SzlaBiz,
+        MIN(pfb.BizDatum) AS ElsoPforgDatum
+    FROM TPforgBizSor pfbs
+    inner join TPforgBiz pfb ON pfb.Azonosito = pfbs.PforgBiz
+    WHERE pfb.Ervenytelenitve != 1
+        AND pfb.Stornozva = 0
+        AND pfb.StornoJel = 0
+    GROUP BY pfbs.SzlaBiz
+),
+
+
+SzlaAlapAdatok AS (
+    SELECT
+        szla.Azonosito as Azonosito,
+        up.Nev AS Szervezet,
+		Left(up.AdoSzam, 8) as SzervezetTorzsSzam,
+        gi.Kod AS GazdEv,
+        p.Kod AS PartKod,
+        szla.PartNev as PartNev,
+        szla.PartAdoSzam AS AdoSzam,
+        LEFT(szla.PartAdoszam, 8) AS TorzsSzam,
+        szla.PartEuAdoSzam AS EuAdoszam,
+        szla.PartKulfoldiAdoSzam AS KulfoldiAdoszam,
+        szla.PartCsoportAzonosito as PartCsoportAzonosito,
+        szla.IktSzlaSzam AS SzlaSzam,
+        al.Kod AS SzlaAllapotKod,
+        pe.Kod AS PenzNem,
+        szv.Kod AS SzallVevo,
+        
+        CAST(szla.BizDatum AS DATE) AS BizDatum,
+        CAST(szla.TeljDatum AS DATE) AS TeljDatum,
+        CAST(szla.FizHatDatum AS DATE) AS FizHat,
+        CAST(epd.ElsoPforgDatum AS DATE) AS ElsoPforgDatum,
+        
+        REPLACE(
+            REPLACE(
+                REPLACE(
+                    CONCAT_WS('',
+                        szla.PartSzlaCimIrSzam, szla.PartSzlaCimHelyseg, szla.PartSzlaCimKerulet,
+                        szla.PartSzlaCimKozter, szla.PartSzlaCimKozterJelleg, szla.PartSzlaCimHazSzam,
+                        szla.PartSzlaCimEpulet, szla.PartSzlaCimLepcsohaz, szla.PartSzlaCimEmeletSzint,
+                        szla.PartSzlaCimAjto, szla.PartSzlaCimHelyrajziSzam
+                    ),
+                    '.', ''),
+                ',', ''),
+            ' ', ''
+        ) AS Cim,
+        
+        CAST(CASE WHEN al.Kod = 'PREND' THEN 0 ELSE 1 END AS BIT) AS NemRendezett,
+        CAST(CASE 
+            WHEN szla.GazdIdoszak != rp.AktGazdIdoszak AND szla.EvNyitasAllapot != '' 
+            THEN 1 
+            ELSE 0 
+        END AS BIT) AS EvNyitott,
+        CAST(szla.DevizaJel AS BIT) AS DevizaJel,
+        
+        szla.EredetiBrErtek as EredetiBrErtek,
+        szla.EredetiPenzNemErtek as EredetiPenzNemErtek,
+        szla.BrErtek AS AktualisBrErtek,
+        szla.PenzNemErtek AS AktualisPenzNemErtek,
+        szla.PforgRendErtek as PforgRendErtek,
+        szla.PforgRendPenzNemErtek as PforgRendPenzNemErtek,
+        szla.FizHatDatum as FizHatDatum
+        
+    FROM TSzlaBiz szla
+    inner join TPart p ON p.Azonosito = szla.Part
+    inner join TPart up ON up.UgyfelJel = 1
+    inner join TSzallVevoJelleg szv ON szv.Azonosito = szla.SzallVevoJelleg
+    inner join TPenzNem pe ON pe.Azonosito = szla.PenzNem
+    inner join TSzlaBizAllapot al ON al.Azonosito = szla.SzlaBizAllapot
+    inner join TRendParam rp ON rp.Aktiv = 1
+    inner join TGazdIdoszak gi ON gi.Azonosito = rp.AktGazdIdoszak
+    left join ElsoPforgDatumok epd ON epd.SzlaBiz = szla.Azonosito
+    WHERE szla.RogzZarva = 1
+        AND al.Kod NOT IN ('SZOSSZ', 'RONT')
+        AND szla.Ervenytelenitve = 0
+),
+
+-- 3. CTE: Számított értékek
+SzlaKalkulaltErtekek AS (
+    SELECT
+        Azonosito,
+        Szervezet,
+		SzervezetTorzsSzam,
+        GazdEv,
+        PartKod,
+        PartNev,
+        Cim,
+        AdoSzam,
+        TorzsSzam,
+        EuAdoszam,
+        KulfoldiAdoszam,
+        PartCsoportAzonosito,
+        SzlaSzam,
+        SzlaAllapotKod,
+        PenzNem,
+        BizDatum,
+        TeljDatum,
+        FizHat,
+        SzallVevo,
+        ElsoPforgDatum,
+        
+        CASE 
+            WHEN NemRendezett = 1 
+            THEN DATEDIFF(DAY, FizHatDatum, CAST(GETDATE() AS DATE))
+            ELSE 0
+        END AS LejartNapok,
+        
+        CASE 
+            WHEN DevizaJel = 0 THEN EredetiBrErtek
+            ELSE EredetiPenzNemErtek
+        END AS BrErtek,
+        
+        EredetiBrErtek AS BrErtekHUF,
+        
+        CASE 
+            WHEN DevizaJel = 0 THEN
+                CASE WHEN EvNyitott = 1 
+                    THEN (EredetiBrErtek - AktualisBrErtek) + PforgRendErtek
+                    ELSE PforgRendErtek
+                END
+            ELSE
+                CASE WHEN EvNyitott = 1 
+                    THEN (EredetiPenzNemErtek - AktualisPenzNemErtek) + PforgRendPenzNemErtek
+                    ELSE PforgRendPenzNemErtek
+                END
+        END AS PforgRendezve,
+        
+        CASE WHEN EvNyitott = 1 
+            THEN (EredetiBrErtek - AktualisBrErtek) + PforgRendErtek
+            ELSE PforgRendErtek
+        END AS PforgRendezveHUF
+        
+    FROM SzlaAlapAdatok
+)
+
+
+SELECT
+    Szervezet AS Szervezet,
+	SzervezetTorzsSzam as SzervezetTorzsSzam,
+    GazdEv AS GazdEv,
+    PartKod AS PartKod,
+    PartNev AS PartNev,
+    Cim AS Cim,
+    AdoSzam AS Adoszam,
+    TorzsSzam AS TorzsSzam,
+    EuAdoszam AS EuAdoszam,
+    KulfoldiAdoszam AS KulfoldiAdoszam,
+    SzlaSzam AS SzlaSzam,
+    SzlaAllapotKod AS SzlaAllKod,
+    PenzNem AS PenzNem,
+    BizDatum AS BizDatum,
+    TeljDatum AS TeljDatum,
+    FizHat AS FizHatDatum,
+    LejartNapok AS LejartNapok,
+    SzallVevo AS SZV,
+    CAST(BrErtek AS DECIMAL(18,2)) AS BrErtek,
+    CAST(BrErtekHUF AS DECIMAL(18,2)) AS BrErtekHUF,
+    CAST(PforgRendezve AS DECIMAL(18,2)) AS PrendErtek,
+    CAST(PforgRendezveHUF AS DECIMAL(18,2)) AS PrendErtekHUF,
+    CAST(BrErtek - PforgRendezve AS DECIMAL(18,2)) AS NemPrendErtek,
+    CAST(BrErtekHUF - PforgRendezveHUF AS DECIMAL(18,2)) AS NemPrendErtekHUF,
+    ElsoPforgDatum AS ElsoPforgDatum
+FROM SzlaKalkulaltErtekek
+
+
+################################################################################
+
+CREATE VIEW eosview.SDA_Eredm
+AS
+
+with EredmenySzamlak as (
+	select 
+	fsz.Azonosito as Foksz, 
+	SUBSTRING(fsz.Kod,1,1) as KoltsegNem
+	from TFoksz fsz
+	where (fsz.Kod like ('5%') or fsz.Kod like ('8%') or fsz.Kod like ('9%'))
+	and fsz.Elemi=1
+
+),
+
+Ertekek as (
+	select
+		kb.BizDatum as KonyvDatum,
+		fsz.Azonosito as FokszAzonosito,
+		cast(case when eszla.KoltsegNem in ('9') then (kbs.KovErtek-kbs.TarErtek) else (kbs.TarErtek-kbs.KovErtek) end as decimal) as Egyenleg
+		
+		from TKonyvBizSor kbs
+		inner join TKonyvBiz kb on kb.Azonosito=kbs.KonyvBiz
+		inner join TMozgNem mn on mn.Azonosito=kb.MozgNem
+		inner join TFoksz fsz on fsz.Azonosito=kbs.Foksz
+		inner join TFokszTipus fszt on fszt.Azonosito=fsz.FokszTipus
+		inner join TTarKov tk on tk.Azonosito=fszt.TarKov
+		inner join EredmenySzamlak eszla on eszla.Foksz = kbs.Foksz
+		
+		where kbs.Azonosito<>0
+		and kb.RogzZarva=1
+		and kb.Aktiv=1
+		and kb.Ervenytelenitve=0
+		and mn.KonyvBiz_Zaro=0
+		
+)
+
+select
+	max(up.Nev) AS Szervezet,
+	max(Left(up.AdoSzam, 8)) as SzervezetTorzsSzam,
+    max(gi.Kod) AS GazdEv,
+	max(EredmSor.Sorrend) as EredmSor_Sorrend,
+	max(EredmSor.Sor) as EredmSor_Kod,
+	max(EredmSor.Sor) +' - ' + max(EredmSor.Nev) as EredmSor, 
+	max(substring(EredmSor.Kategoria,1,1)) as KategoriaCsoport,
+	max(substring(EredmSor.Kategoria,1,2)) as Kategoria_Sorrend,
+	coalesce(sum(e.Egyenleg),0) as Summa
+
+	from TEredm Eredm
+	inner join TEredmLap EredmLap on (EredmLap.Eredm=Eredm.Azonosito)
+	inner join TEredmSor EredmSor on (EredmSor.EredmLap=EredmLap.Azonosito)
+	left join TEredmSor_Foksz EredmSor_Foksz on (EredmSor_Foksz.EredmSor=EredmSor.Azonosito)
+	left join Ertekek e on e.FokszAzonosito = EredmSor_Foksz.Foksz
+	inner join TRendParam rp ON rp.Aktiv = 1
+    inner join TGazdIdoszak gi ON gi.Azonosito = rp.AktGazdIdoszak
+	inner join TPart up ON up.UgyfelJel = 1
+	where Eredm.Azonosito<>0
+	and EredmSor.Elemi=1
+	and Eredm.Kod='BESZ'
+		
+
+	group by EredmSor.Sor
+
+######################################################################
+
+CREATE VIEW eosview.SDA_EredmSablon
+AS
+select
+	EredmSor.Sorrend as EredmSor_Sorrend,
+	EredmSor.Sor as EredmSor_Kod,
+	EredmSor.Nev as EredmSorNev, 
+	cast(EredmSor.Elemi as bit) as Elemi,
+	substring(EredmSor.Kategoria,1,1) as KategoriaCsoport,
+	substring(EredmSor.Kategoria,1,2) as KategoriaKod,
+	LTRIM(SUBSTRING(EredmSor.Kategoria, CHARINDEX('-', EredmSor.Kategoria) + 1, LEN(EredmSor.Kategoria))) as KatNev
+	
+
+	from TEredm Eredm
+	inner join TEredmLap EredmLap on (EredmLap.Eredm=Eredm.Azonosito)
+	inner join TEredmSor EredmSor on (EredmSor.EredmLap=EredmLap.Azonosito)
+	
+	where Eredm.Azonosito<>0
+	and Eredm.Kod='BESZ'
+	
+
+	
+######################################################################
+CREATE VIEW eosview.SDA_EredmEredmSablon
+AS
+
+WITH RecursiveHierarchy AS (
+    -- ANCHOR: Első szint - összegfokozatos sorok közvetlen alsorai
+    SELECT 
+        EredmSor.Sor AS OEredmSor,
+        e.Sor AS ElemiSor,
+        e.Elemi AS ElemiSorElemi,
+        mj.Kod AS MuvJel
+    FROM TEredm Eredm
+    INNER JOIN TEredmLap EredmLap ON EredmLap.Eredm = Eredm.Azonosito
+    INNER JOIN TEredmSor EredmSor ON EredmSor.EredmLap = EredmLap.Azonosito
+    LEFT JOIN TEredmSor_EredmSor ee ON ee.OEredmSor = EredmSor.Azonosito
+    INNER JOIN TEredmSor e ON e.Azonosito = ee.EredmSor
+    LEFT JOIN TMuvJel mj ON mj.Azonosito = ee.MuvJel
+    WHERE Eredm.Kod = 'BESZ' 
+      AND EredmSor.Elemi = 0
+    
+    UNION ALL
+    
+    -- RECURSIVE: Ha ElemiSor maga is összegfokozatos (Elemi=0), kibontjuk tovább
+    SELECT 
+        rh.OEredmSor,
+        e2.Sor AS ElemiSor,
+        e2.Elemi AS ElemiSorElemi,
+        -- MuvJel kombinálás
+        CASE 
+            WHEN (rh.MuvJel = '++' AND mj2.Kod = '++') OR (rh.MuvJel = '--' AND mj2.Kod = '--') THEN '++'
+            ELSE '--'
+        END AS MuvJel
+    FROM RecursiveHierarchy rh
+    INNER JOIN TEredmSor e1 ON e1.Sor = rh.ElemiSor AND e1.Elemi = 0
+    INNER JOIN TEredmSor_EredmSor ee2 ON ee2.OEredmSor = e1.Azonosito
+    INNER JOIN TEredmSor e2 ON e2.Azonosito = ee2.EredmSor
+    INNER JOIN TMuvJel mj2 ON mj2.Azonosito = ee2.MuvJel  -- ← LEFT helyett INNER!
+)
+SELECT 
+    OEredmSor,
+    ElemiSor,
+    MuvJel
+FROM RecursiveHierarchy
+WHERE ElemiSorElemi = 1
+
