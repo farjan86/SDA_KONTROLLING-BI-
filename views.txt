@@ -329,7 +329,7 @@ select
 	EredmSor.Sorrend as EredmSor_Sorrend,
 	EredmSor.Sor as EredmSor_Kod,
 	EredmSor.Nev as EredmSorNev, 
-	cast(EredmSor.Elemi as bit) as Elemi,
+	EredmSor.Elemi as Elemi,
 	substring(EredmSor.Kategoria,1,1) as KategoriaCsoport,
 	substring(EredmSor.Kategoria,1,2) as KategoriaKod,
 	LTRIM(SUBSTRING(EredmSor.Kategoria, CHARINDEX('-', EredmSor.Kategoria) + 1, LEN(EredmSor.Kategoria))) as KatNev
